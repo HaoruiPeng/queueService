@@ -4,6 +4,29 @@ import time
 import sys
 from minio import Minio
 from minio.error import S3Error
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+
+HEALTH_CHECK_PORT = 8080
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/healthz':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'ok')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def run_health_check_server():
+    try:
+        server_address = ('0.0.0.0', HEALTH_CHECK_PORT)
+        httpd = HTTPServer(server_address, HealthCheckHandler)
+        httpd.serve_forever()
+    except Exception as e:
+        print(f"[!] Health check server failed: {e}", file=sys.stderr)
 
 def process_and_send_files():
     """
@@ -54,43 +77,51 @@ def process_and_send_files():
             time.sleep(5)
 
     try:
-        # Establish two channels for reading and writing
+        # Channel for event-trigger by the Bucket
         read_bucket_channel = connection.channel()
         read_bucket_channel.queue_declare(queue=files_storage, durable=True)
 
+        # Channel for write the file
         write_channel = connection.channel()
         write_channel.queue_declare(queue=tasks_queue, durable=True)
 
         def callback(ch, method, properties, body):
-            """This function is called when a message is received."""
             file_name = body.decode()
             print(f" [x] Received job for file: '{file_name}'")
 
             try:
-                # --- Download file from MinIO ---
+                # Download file from MinIO 
                 response = minio_client.get_object(s3_bucket, file_name)
                 print(f" [*] Successfully downloaded '{file_name}' from MinIO.")
                 
-                # --- Read file and publish lines ---
+                # Read file and publish by lines
                 file_content = response.read().decode('utf-8')
                 lines = file_content.splitlines()
+                num_lines = len(lines)
                 
-                for line in lines:
-                    if line: # Ensure we don't send empty lines
-                        write_channel.basic_publish(
-                            exchange='',
-                            routing_key=tasks_queue,
-                            body=line,
-                            properties=pika.BasicProperties(delivery_mode=2)
-                        )
-                        print(f"   [>] Sent line: '{line[:30]}...'")
+                for i, line in enumerate(lines):
+                    is_last = (i == num_lines - 1)
+                    
+                    message_payload = {
+                        'file_name': file_name,
+                        'line_content': line,
+                        'is_last_line': is_last
+                    }
+                    
+                    message_body = json.dumps(message_payload)
+                    
+                    write_channel.basic_publish(
+                        exchange='',
+                        routing_key=tasks_queue,
+                        body=message_body,
+                        properties=pika.BasicProperties(delivery_mode=2)
+                    )
                 
                 print(f" [✔] Finished processing '{file_name}'.")
 
             except S3Error as e:
                 print(f" [!] Error accessing file '{file_name}' in MinIO: {e}", file=sys.stderr)
             finally:
-                # Acknowledge the message was processed (or failed)
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 if 'response' in locals():
                     response.close()
@@ -112,4 +143,8 @@ def process_and_send_files():
             print("[*] Connection closed.")
 
 if __name__ == '__main__':
+    
+    health_thread = threading.Thread(target=run_health_check_server, daemon=True)
+    health_thread.start()
+
     process_and_send_files()
