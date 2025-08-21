@@ -17,3 +17,34 @@ The original idea was to deploy the writer and reader as batch jobs. So the apps
 ## File buffer
 
 The implementation of the file buffer in the reader is to buffer a whole file before writing to the destination S3 bucket. A more native solution should be using redis. 
+
+## Tests
+
+I didn't write any test due to time limit, but here are some test cases I was think to implement:
+
+### Unit test
+
+#### writer
+
+- When the file provided in the queue does not exists in the storage
+- An empty file
+- Wrong queue names
+- Wrong source S3 bucket name 
+
+#### reader
+
+- Received empty file
+- The received payload misses certain key
+- Empty file
+- Wrong queue name
+- Wrong destination S3 bucket name 
+
+### Integration test
+
+- Binding wrong queue names for exchanging msgs between writer and reader
+- Large file transmission
+- Large amount of files transmission
+
+### E2E test
+
+- Test on HPA
