@@ -17,3 +17,40 @@ The original idea was to deploy the writer and reader as batch jobs. So the apps
 ## File buffer
 
 The implementation of the file buffer in the reader is to buffer a whole file before writing to the destination S3 bucket. A more native solution should be using redis. 
+
+## Tests
+
+I didn't write any test due to time limit, but here are some test cases I was think to implement:
+
+### Unit test
+
+#### writer
+
+- When the file provided in the queue does not exists in the storage
+- Wrong queue names
+- Wrong source S3 bucket name
+- empty file
+- non UTF-8 characters
+
+#### reader
+
+- Received empty file
+- The received payload misses certain key
+- Empty file
+- Wrong queue name
+- Wrong destination S3 bucket name 
+
+### Integration test
+
+- Upload a file and send the name to the "file-storage"  queue.
+- Upload multiple files
+- Run multiple replicas of reader pods
+- restart the RabbitMQ pods and check if both writer and reader can connect back to it
+
+### E2E test
+
+- Test on HPA
+  - Large file transmission
+  - Large amount of files transmission
+- Duplicated files
+
