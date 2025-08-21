@@ -6,9 +6,30 @@ import time
 from minio import Minio
 from minio.error import S3Error
 from io import BytesIO
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 FILE_BUFFERS = {}
+HEALTH_CHECK_PORT = 8080
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/healthz':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'ok')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def run_health_check_server():
+    try:
+        server_address = ('0.0.0.0', HEALTH_CHECK_PORT)
+        httpd = HTTPServer(server_address, HealthCheckHandler)
+        httpd.serve_forever()
+    except Exception as e:
+        print(f"[!] Health check server failed: {e}", file=sys.stderr)
 
 def receive_and_save_file(queue_name='queue'):
     """
@@ -60,16 +81,14 @@ def receive_and_save_file(queue_name='queue'):
         channel.queue_declare(queue=tasks_queue, durable=True)
 
         def callback(ch, method, properties, body):
-            """Processes received messages."""
             try:
                 payload = json.loads(body.decode())
                 file_name = payload['file_name']
                 line = payload['line_content']
                 is_last = payload['is_last_line']
 
-                print(f" [x] Received line for '{file_name}': '{line[:50]}...'")
+                print(f" [x] Received line for '{file_name}': '{line[:30]}...'")
 
-                # Add the line to the corresponding file buffer
                 if file_name not in FILE_BUFFERS:
                     FILE_BUFFERS[file_name] = []
                 FILE_BUFFERS[file_name].append(line)
@@ -122,6 +141,7 @@ def receive_and_save_file(queue_name='queue'):
             print("[*] Connection closed.")
 
 if __name__ == '__main__':
-    # You will need to have MinIO running for this script to work.
-    # You can install the minio client via: pip install minio
+    health_thread = threading.Thread(target=run_health_check_server, daemon=True)
+    health_thread.start()
+
     receive_and_save_file()
