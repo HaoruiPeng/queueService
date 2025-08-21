@@ -34,7 +34,7 @@ def process_and_send_files():
     """
     rabbitmq_host = os.environ.get('RABBITMQ_URL', 'variable does not exist')
     files_storage = 'files' 
-    tasks_queue = 'queue'
+    tasks_exchange = 'queue'
 
     s3_endpoint = os.environ.get('S3_ENDPOINT', 'variable does not exist')
     s3_access_key = os.environ.get('S3_ACCESS_KEY', 'variable does not exist')
@@ -83,7 +83,11 @@ def process_and_send_files():
 
         # Channel for write the file
         write_channel = connection.channel()
-        write_channel.queue_declare(queue=tasks_queue, durable=True)
+        write_channel.exchange_declare(
+            exchange=tasks_exchange,
+            exchange_type='x-consistent-hash',
+            durable=True
+        )
 
         def callback(ch, method, properties, body):
             file_name = body.decode()
@@ -111,13 +115,13 @@ def process_and_send_files():
                     message_body = json.dumps(message_payload)
                     
                     write_channel.basic_publish(
-                        exchange='',
-                        routing_key=tasks_queue,
+                        exchange=tasks_exchange,
+                        routing_key=file_name, 
                         body=message_body,
                         properties=pika.BasicProperties(delivery_mode=2)
                     )
-                
                 print(f" [✔] Finished processing '{file_name}'.")
+                
 
             except S3Error as e:
                 print(f" [!] Error accessing file '{file_name}' in MinIO: {e}", file=sys.stderr)
