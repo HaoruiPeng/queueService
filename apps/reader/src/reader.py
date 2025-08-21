@@ -36,7 +36,7 @@ def receive_and_save_file(queue_name='queue'):
     Connects to RabbitMQ and MinIO.
     """
     rabbitmq_host = os.environ.get('RABBITMQ_URL', 'variable does not exist')
-    tasks_queue = 'queue'
+    tasks_exchange = 'queue'
 
     s3_endpoint = os.environ.get('S3_ENDPOINT', 'variable does not exist')
     s3_access_key = os.environ.get('S3_ACCESS_KEY', 'variable does not exist')
@@ -78,7 +78,20 @@ def receive_and_save_file(queue_name='queue'):
     
     try:
         channel = connection.channel()
-        channel.queue_declare(queue=tasks_queue, durable=True)
+        channel.exchange_declare(
+            exchange=tasks_exchange,
+            exchange_type='x-consistent-hash',
+            durable=True
+        )
+
+        result = channel.queue_declare(queue='', exclusive=True)
+        # Exclusive queue name for this reader
+        queue_name = result.method.queue
+
+        # *** CHANGE: Bind this pod's personal queue to the exchange. ***
+        # The routing key '1' is a weight. Using the same weight for all readers
+        # ensures an even distribution of files between them.
+        channel.queue_bind(exchange=tasks_exchange, queue=queue_name, routing_key='1')
 
         def callback(ch, method, properties, body):
             try:
