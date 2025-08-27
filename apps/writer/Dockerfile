@@ -26,5 +26,6 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 USER 1000
 
+EXPOSE 8080
 # 10. Set the command to run your application
 CMD ["python", "-u", "writer.py"]
